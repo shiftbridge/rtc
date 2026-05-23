@@ -37,8 +37,8 @@ function HomeEntryForm() {
           <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-amber-400 font-bold text-slate-900 shadow-sm mb-3 text-xl">
             💬
           </div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Join a Chat Hub</h2>
-          <p className="mt-1 text-sm text-slate-500">Enter your details to start chatting in real-time</p>
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900">HiChat</h2>
+          <p className="mt-1 text-sm text-slate-500">Enter your Username and Room Name and chat</p>
         </div>
 
         {/* Dynamic Name Collision Warning Alert box */}
