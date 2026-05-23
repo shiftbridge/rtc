@@ -16,51 +16,87 @@ export default function ChatRoomPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
   
+  const channelRef = useRef<any>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const remoteTypingTimeoutsRef = useRef<{ [key: string]: NodeJS.Timeout }>({});
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    // 1. Double check your browser console for this log. If either is undefined, 
-    // your keys are missing from your .env.local file!
-    console.log("Pusher Client Connection Request:", {
-      key: process.env.NEXT_PUBLIC_PUSHER_KEY,
-      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER
-    });
+    if (!process.env.NEXT_PUBLIC_PUSHER_KEY || !process.env.NEXT_PUBLIC_PUSHER_CLUSTER) return;
 
-    if (!process.env.NEXT_PUBLIC_PUSHER_KEY || !process.env.NEXT_PUBLIC_PUSHER_CLUSTER) {
-      console.error("❌ Environment variables are missing!");
-      return;
-    }
-
-    // 2. Initialize Pusher with explicit security and activity timeouts
+    // Initialize Pusher pointing to our fresh route handler endpoint
     const pusherClient = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
       cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
-      forceTLS: true,          // Forces wss:// instead of ws://
-      enabledTransports: ['ws', 'wss'] // Prevents Firefox from lagging out on fallback HTTP pooling
+      forceTLS: true,
+      channelAuthorization: {
+        endpoint: '/api/pusher/auth',
+        transport: 'ajax',
+      }
     });
 
-    const channel = pusherClient.subscribe(`room-${roomId}`);
+    // Private prefix is required to use client-side messaging channels
+    const channel = pusherClient.subscribe(`private-room-${roomId}`);
+    channelRef.current = channel;
 
     pusherClient.connection.bind('connected', () => setIsConnected(true));
     pusherClient.connection.bind('disconnected', () => setIsConnected(false));
-    pusherClient.connection.bind('unavailable', () => setIsConnected(false));
 
+    // Listen for regular chat incoming entries
     channel.bind('new-message', (data: Message) => {
       setMessages((prev) => [...prev, data]);
+      // Instantly wipe out this specific user's typing flag when their message arrives
+      setTypingUsers((prev) => prev.filter(u => u !== data.user));
     });
 
-    // 3. Firefox Clean-up: This block is absolutely critical.
-    // When Firefox unmounts the component, we cleanly shut down the socket channel.
+    // Listen for client whispers containing typing updates
+    channel.bind('client-typing', (data: { user: string }) => {
+      if (data.user === username) return; // Skip ourselves
+
+      setTypingUsers((prev) => {
+        if (prev.includes(data.user)) return prev;
+        return [...prev, data.user];
+      });
+
+      // Automatically clear this specific username out if they stop typing for 2 seconds
+      if (remoteTypingTimeoutsRef.current[data.user]) {
+        clearTimeout(remoteTypingTimeoutsRef.current[data.user]);
+      }
+      
+      remoteTypingTimeoutsRef.current[data.user] = setTimeout(() => {
+        setTypingUsers((prev) => prev.filter(u => u !== data.user));
+      }, 2000);
+    });
+
     return () => {
       channel.unbind_all();
       channel.unsubscribe();
       pusherClient.disconnect();
+      Object.values(remoteTypingTimeoutsRef.current).forEach(clearTimeout);
     };
-  }, [roomId]);
+  }, [roomId, username]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, typingUsers]);
+
+  // Triggers whenever a local key is struck inside the input element box
+  const handleInputChange = (text: string) => {
+    setInput(text);
+    if (!channelRef.current || !isConnected) return;
+
+    // Send a client whisper directly across the socket pipe line
+    if (!typingTimeoutRef.current) {
+      channelRef.current.trigger('client-typing', { user: username });
+    }
+
+    // Debounce window setup: limits client whispers to once every 1.5 seconds
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      typingTimeoutRef.current = null;
+    }, 1500);
+  };
 
   const sendMessage = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -96,10 +132,9 @@ export default function ChatRoomPage() {
           </div>
         </div>
         
-        {/* Connection Status Badge */}
         <div className="flex items-center gap-2 rounded-full bg-slate-800 px-3 py-1 text-xs font-medium">
           <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-          <span className="text-slate-300">{isConnected ? 'Serverless Live' : 'Connecting...'}</span>
+          <span className="text-slate-300">{isConnected ? 'Connected' : 'Connecting...'}</span>
         </div>
       </div>
 
@@ -128,6 +163,21 @@ export default function ChatRoomPage() {
             );
           })
         )}
+
+        {/* Real-time Typing Notification Layout Badge */}
+        {typingUsers.length > 0 && (
+          <div className="flex items-center gap-2 text-xs text-slate-500 italic bg-slate-200/50 rounded-lg px-3 py-1.5 w-fit animate-fade-in">
+            <div className="flex gap-0.5 items-center justify-center pt-0.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+            <span>
+              {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+            </span>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -137,7 +187,7 @@ export default function ChatRoomPage() {
           <input
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             placeholder={`Message #${roomId}...`}
             className="flex-grow rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 outline-none"
           />

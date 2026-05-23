@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Bun & Next.js 16 Chat App",
-  description: "Real-time chat using native WebSockets",
+  title: "HiChat",
+  description: "Real Time Chat",
 };
 
 export default function RootLayout({
