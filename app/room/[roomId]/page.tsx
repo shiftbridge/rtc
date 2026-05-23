@@ -49,11 +49,21 @@ export default function ChatRoomPage() {
     pusherClient.connection.bind('disconnected', () => setIsConnected(false));
 
     // Trap name collision auth rejections
-    channel.bind('pusher:subscription_error', (status: any) => {
-      if (status.status === 403) {
-      // Gracefully send them home with an explicit URL query parameter
-        router.push('/?error=taken');
+    channel.bind('client-typing', (data: { user: string }) => {
+      if (data.user === username) return;
+
+      setTypingUsers((prev) => {
+        if (prev.includes(data.user)) return prev;
+        return [...prev, data.user];
+      });
+
+      if (remoteTypingTimeoutsRef.current[data.user]) {
+        clearTimeout(remoteTypingTimeoutsRef.current[data.user]);
       }
+      
+      remoteTypingTimeoutsRef.current[data.user] = setTimeout(() => {
+        setTypingUsers((prev) => prev.filter(u => u !== data.user));
+      }, 2500);
     });
 
     // Handle initial successful room load
@@ -108,15 +118,17 @@ export default function ChatRoomPage() {
     setInput(text);
     if (!channelRef.current || !isConnected) return;
 
+    // If there's no active timeout cooldown, fire a typing notification immediately
     if (!typingTimeoutRef.current) {
       channelRef.current.trigger('client-typing', { user: username });
+    
+      // Set up a 1-second cooldown. After 1 second, if you are STILL typing, 
+      // it clears itself and allows the next keystroke to send a fresh heartbeat.
+      typingTimeoutRef.current = setTimeout(() => {
+        typingTimeoutRef.current = null;
+      }, 1000); 
     }
-
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
-      typingTimeoutRef.current = null;
-    }, 1500);
-  };
+  }
 
   const sendMessage = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -140,7 +152,7 @@ export default function ChatRoomPage() {
     <div className="flex h-screen max-w-5xl mx-auto md:my-6 md:h-[calc(100vh-48px)] gap-4 px-4 font-sans">
       
       {/* LEFT AREA: Chat Panel */}
-      <div className="flex flex-grow flex-col bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
+      <div className="flex grow flex-col bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
         
         {/* Header */}
         <div className="flex items-center justify-between bg-slate-900 px-6 py-4 text-white">
@@ -162,7 +174,7 @@ export default function ChatRoomPage() {
         </div>
 
         {/* Message Bay */}
-        <div className="flex-grow overflow-y-auto bg-slate-50 p-6 space-y-4">
+        <div className="grow overflow-y-auto bg-slate-50 p-6 space-y-4">
           {messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center text-center p-6">
               <span className="text-3xl mb-2">👋</span>
@@ -177,7 +189,7 @@ export default function ChatRoomPage() {
                     <span className="text-xs font-semibold text-slate-600">{msg.user}</span>
                     <span className="text-[10px] text-slate-400">{msg.timestamp}</span>
                   </div>
-                  <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm shadow-sm font-normal break-words
+                  <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm shadow-sm font-normal wrap-break-word
                     ${isMe ? 'bg-amber-400 text-slate-900 rounded-tr-none font-medium' : 'bg-white text-slate-800 border border-slate-200/80 rounded-tl-none'}`}
                   >
                     {msg.text}
@@ -208,7 +220,7 @@ export default function ChatRoomPage() {
               value={input}
               onChange={(e) => handleInputChange(e.target.value)}
               placeholder={`Message #${roomId}...`}
-              className="flex-grow rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 outline-none"
+              className="grow rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 outline-none"
             />
             <button type="submit" disabled={!input.trim()} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm disabled:opacity-30">
               Send
@@ -222,7 +234,7 @@ export default function ChatRoomPage() {
         <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">
           Active Members ({memberCount})
         </h3>
-        <div className="flex-grow overflow-y-auto space-y-2.5">
+        <div className="grow overflow-y-auto space-y-2.5">
           {memberList.map((name) => (
             <div key={name} className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl hover:bg-slate-50 transition-colors">
               <div className="relative">
@@ -231,7 +243,7 @@ export default function ChatRoomPage() {
                 </div>
                 <div className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-white" />
               </div>
-              <span className="text-sm font-medium text-slate-700 truncate max-w-[140px]">
+              <span className="text-sm font-medium text-slate-700 truncate max-w-35">
                 {name} {name === username && <span className="text-xs text-slate-400 font-normal">(you)</span>}
               </span>
             </div>
