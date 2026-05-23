@@ -36,34 +36,20 @@ export default function ChatRoomPage() {
       channelAuthorization: {
         endpoint: '/api/pusher/auth',
         transport: 'ajax',
-        // Inject the username directly into the authentication body payload
         params: { username }
       }
     });
 
-    // Upgraded to presence channel architecture
     const channel = pusherClient.subscribe(`presence-room-${roomId}`);
     channelRef.current = channel;
 
     pusherClient.connection.bind('connected', () => setIsConnected(true));
     pusherClient.connection.bind('disconnected', () => setIsConnected(false));
 
-    // Trap name collision auth rejections
-    channel.bind('client-typing', (data: { user: string }) => {
-      if (data.user === username) return;
-
-      setTypingUsers((prev) => {
-        if (prev.includes(data.user)) return prev;
-        return [...prev, data.user];
-      });
-
-      if (remoteTypingTimeoutsRef.current[data.user]) {
-        clearTimeout(remoteTypingTimeoutsRef.current[data.user]);
+    channel.bind('pusher:subscription_error', (status: any) => {
+      if (status.status === 403) {
+        router.push('/?error=taken');
       }
-      
-      remoteTypingTimeoutsRef.current[data.user] = setTimeout(() => {
-        setTypingUsers((prev) => prev.filter(u => u !== data.user));
-      }, 2500);
     });
 
     // Handle initial successful room load
@@ -99,7 +85,7 @@ export default function ChatRoomPage() {
       if (remoteTypingTimeoutsRef.current[data.user]) clearTimeout(remoteTypingTimeoutsRef.current[data.user]);
       remoteTypingTimeoutsRef.current[data.user] = setTimeout(() => {
         setTypingUsers((prev) => prev.filter(u => u !== data.user));
-      }, 2000);
+      }, 2500); // 2.5 second expiration window
     });
 
     return () => {
