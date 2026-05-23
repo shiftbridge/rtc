@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     };
 
     // Trigger an event named 'new-message' on a channel dedicated to this specific room
-    await pusher.trigger(`private-room-${room}`, 'new-message', payload);
+    await pusher.trigger(`presence-room-${room}`, 'new-message', payload);
     
     return NextResponse.json({ success: true });
   } catch (error: any) {
