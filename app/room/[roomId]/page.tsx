@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, FormEvent } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Pusher from "pusher-js";
 import { Message } from "@/types/chat";
@@ -17,8 +17,8 @@ export default function ChatRoomPage() {
   const [input, setInput] = useState<string>("");
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
 
-  // Real-time tracking arrays for active members
   const [memberCount, setMemberCount] = useState<number>(1);
   const [memberList, setMemberList] = useState<string[]>([]);
 
@@ -56,7 +56,6 @@ export default function ChatRoomPage() {
       }
     });
 
-    // Handle initial successful room load
     channel.bind("pusher:subscription_succeeded", (members: any) => {
       setMemberCount(members.count);
       const names: string[] = [];
@@ -64,13 +63,11 @@ export default function ChatRoomPage() {
       setMemberList(names);
     });
 
-    // Handle a new person joining
     channel.bind("pusher:member_added", (member: any) => {
       setMemberCount((prev) => prev + 1);
       setMemberList((prev) => [...prev, member.id]);
     });
 
-    // Handle someone leaving or closing the tab
     channel.bind("pusher:member_removed", (member: any) => {
       setMemberCount((prev) => Math.max(1, prev - 1));
       setMemberList((prev) => prev.filter((name) => name !== member.id));
@@ -92,7 +89,7 @@ export default function ChatRoomPage() {
         clearTimeout(remoteTypingTimeoutsRef.current[data.user]);
       remoteTypingTimeoutsRef.current[data.user] = setTimeout(() => {
         setTypingUsers((prev) => prev.filter((u) => u !== data.user));
-      }, 2500); // 2.5 second expiration window
+      }, 2500);
     });
 
     return () => {
@@ -111,23 +108,18 @@ export default function ChatRoomPage() {
     setInput(text);
     if (!channelRef.current || !isConnected) return;
 
-    // If there's no active timeout cooldown, fire a typing notification immediately
     if (!typingTimeoutRef.current) {
       channelRef.current.trigger("client-typing", { user: username });
-
-      // Set up a 1-second cooldown. After 1 second, if you are STILL typing,
-      // it clears itself and allows the next keystroke to send a fresh heartbeat.
       typingTimeoutRef.current = setTimeout(() => {
         typingTimeoutRef.current = null;
       }, 1000);
     }
   };
 
-  const sendMessage = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!input.trim()) return;
+  const sendMessage = async (formData: FormData) => {
+    const messageText = formData.get("message")?.toString().trim();
+    if (!messageText) return;
 
-    const messageText = input;
     setInput("");
 
     await fetch("/api/messages", {
@@ -142,45 +134,58 @@ export default function ChatRoomPage() {
   };
 
   return (
-    <div className="flex h-screen max-w-5xl mx-auto md:my-6 md:h-[calc(100vh-48px)] gap-4 px-4 font-sans">
-      {/* LEFT AREA: Chat Panel */}
-      <div className="flex grow flex-col bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between bg-slate-900 px-6 py-4 text-white">
-          <div className="flex items-center gap-3">
+    <div className="flex h-screen w-full bg-slate-950 font-sans antialiased text-slate-200 overflow-hidden relative">
+      {/* LEFT AREA: Main Chat Dashboard */}
+      <div className="flex grow flex-col min-w-0 border-r border-white/6 bg-slate-900/20 backdrop-blur-md h-full">
+        {/* Nav Header Bar */}
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/6 px-4 sm:px-6">
+          <div className="flex items-center gap-2 sm:gap-4">
             <button
               onClick={() => router.push("/")}
-              className="text-slate-400 hover:text-white transition-colors text-sm font-medium"
+              className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-white transition-colors duration-200"
             >
-              ← Leave
+              <span>←</span> <span className="hidden sm:inline">Leave</span>
             </button>
-            <div className="h-2 w-2 rounded-full bg-slate-700" />
-            <div>
-              <h2 className="text-lg font-bold capitalize tracking-tight">
-                #{roomId}
+            <div className="h-4 w-px bg-white/8" />
+            <div className="flex items-center gap-1">
+              <span className="text-sm font-semibold text-slate-400">#</span>
+              <h2 className="text-sm sm:text-base font-bold capitalize tracking-tight text-white truncate max-w-25 sm:max-w-none">
+                {roomId}
               </h2>
-              <p className="text-xs text-slate-400">
-                User:{" "}
-                <span className="text-amber-400 font-semibold">{username}</span>
-              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 rounded-full bg-slate-800 px-3 py-1 text-xs font-medium">
+          {/* Trigger button for mobile sidebar panel drawer */}
+          <button
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="flex items-center gap-2 rounded-full border border-white/6 bg-white/2 px-3 py-1.5 text-xs font-medium hover:bg-white/5 active:scale-95 transition-all md:pointer-events-none"
+          >
             <span
-              className={`h-2 w-2 rounded-full ${isConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}
+              className={`h-2 w-2 rounded-full ring-4 ${
+                isConnected
+                  ? "bg-emerald-500 ring-emerald-500/10 animate-pulse"
+                  : "bg-rose-500 ring-rose-500/10"
+              }`}
             />
-            <span className="text-slate-300">{memberCount} Online</span>
-          </div>
+            <span className="text-slate-400">
+              {memberCount} <span className="hidden sm:inline">online</span>
+            </span>
+          </button>
         </div>
 
-        {/* Message Bay */}
-        <div className="grow overflow-y-auto bg-slate-50 p-6 space-y-4">
+        {/* Dynamic Messaging Window */}
+        <div className="grow overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
           {messages.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center text-center p-6">
-              <span className="text-3xl mb-2">👋</span>
-              <p className="text-sm font-medium text-slate-500">
-                Welcome to the beginning of the #{roomId} channel!
+            <div className="flex h-full flex-col items-center justify-center text-center p-6 max-w-sm mx-auto">
+              <div className="h-11 w-11 rounded-2xl bg-white/2 border border-white/6 flex items-center justify-center text-lg shadow-inner mb-4">
+                👋
+              </div>
+              <h3 className="text-sm font-semibold text-white mb-1">
+                Welcome to #{roomId}
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                This is the absolute beginning of your real-time chat history.
+                Send a message to break the ice!
               </p>
             </div>
           ) : (
@@ -189,19 +194,23 @@ export default function ChatRoomPage() {
               return (
                 <div
                   key={msg.id}
-                  className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
+                  className={`flex flex-col group ${isMe ? "items-end" : "items-start"}`}
                 >
-                  <div className="flex items-baseline gap-2 px-1 mb-1">
-                    <span className="text-xs font-semibold text-slate-600">
-                      {msg.user}
+                  <div className="flex items-center gap-2 mb-1 px-1">
+                    <span className="text-[11px] font-semibold text-slate-300">
+                      {isMe ? "You" : msg.user}
                     </span>
-                    <span className="text-[10px] text-slate-400">
+                    <span className="text-[9px] text-slate-500">
                       {msg.timestamp}
                     </span>
                   </div>
                   <div
-                    className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm shadow-sm font-normal wrap-break-word
-                    ${isMe ? "bg-amber-400 text-slate-900 rounded-tr-none font-medium" : "bg-white text-slate-800 border border-slate-200/80 rounded-tl-none"}`}
+                    className={`max-w-[85%] sm:max-w-[70%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed shadow-lg wrap-break-word transition-all duration-200
+                    ${
+                      isMe
+                        ? "bg-white text-slate-950 rounded-tr-none font-medium shadow-white/5"
+                        : "bg-white/3 text-slate-200 border border-white/6 rounded-tl-none"
+                    }`}
                   >
                     {msg.text}
                   </div>
@@ -210,23 +219,15 @@ export default function ChatRoomPage() {
             })
           )}
 
+          {/* Typing indicator */}
           {typingUsers.length > 0 && (
-            <div className="flex items-center gap-2 text-xs text-slate-500 italic bg-slate-200/50 rounded-lg px-3 py-1.5 w-fit">
-              <div className="flex gap-0.5 items-center justify-center pt-0.5">
-                <span
-                  className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce"
-                  style={{ animationDelay: "0ms" }}
-                />
-                <span
-                  className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce"
-                  style={{ animationDelay: "150ms" }}
-                />
-                <span
-                  className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce"
-                  style={{ animationDelay: "300ms" }}
-                />
+            <div className="flex items-center gap-3 text-xs text-slate-400 bg-white/2 border border-white/4 rounded-xl px-3.5 py-2 w-fit animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="flex gap-1 items-center justify-center">
+                <span className="h-1 w-1 rounded-full bg-amber-400 animate-bounce [animation-delay:-0.3s]" />
+                <span className="h-1 w-1 rounded-full bg-amber-400 animate-bounce [animation-delay:-0.15s]" />
+                <span className="h-1 w-1 rounded-full bg-amber-400 animate-bounce" />
               </div>
-              <span>
+              <span className="font-medium text-[11px] sm:text-xs">
                 {typingUsers.join(", ")}{" "}
                 {typingUsers.length === 1 ? "is" : "are"} typing...
               </span>
@@ -235,20 +236,27 @@ export default function ChatRoomPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Action Box */}
-        <div className="border-t border-slate-100 p-4 bg-white">
-          <form onSubmit={sendMessage} className="flex gap-2 items-center">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => handleInputChange(e.target.value)}
-              placeholder={`Message #${roomId}...`}
-              className="grow rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 outline-none"
-            />
+        {/* Input Text Form Area */}
+        <div className="p-3 sm:p-4 border-t border-white/6 bg-slate-900/40 backdrop-blur-lg shrink-0 pb-safe">
+          <form
+            action={sendMessage}
+            className="flex gap-2 items-center max-w-4xl mx-auto w-full"
+          >
+            <div className="relative flex-1">
+              <input
+                type="text"
+                name="message"
+                value={input}
+                onChange={(e) => handleInputChange(e.target.value)}
+                placeholder={`Message #${roomId}...`}
+                autoComplete="off"
+                className="w-full rounded-xl border border-white/5 bg-white/3 px-3.5 py-3 text-sm text-white placeholder-slate-500 outline-hidden transition-all duration-300 focus:border-white/20 focus:bg-white/5 focus:ring-4 focus:ring-white/5"
+              />
+            </div>
             <button
               type="submit"
               disabled={!input.trim()}
-              className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm disabled:opacity-30"
+              className="rounded-xl bg-white px-4 sm:px-5 py-3 text-sm font-semibold text-slate-950 transition-all duration-200 hover:bg-amber-400 disabled:bg-white/2 disabled:text-slate-600 disabled:border disabled:border-white/4 shrink-0"
             >
               Send
             </button>
@@ -256,33 +264,64 @@ export default function ChatRoomPage() {
         </div>
       </div>
 
-      {/* RIGHT AREA: Active Member Sidebar (Hidden on mobile) */}
-      <div className="hidden md:flex w-64 flex-col bg-white rounded-2xl border border-slate-200 p-5 shadow-xl overflow-hidden">
-        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">
-          Active Members ({memberCount})
-        </h3>
-        <div className="grow overflow-y-auto space-y-2.5">
-          {memberList.map((name) => (
-            <div
-              key={name}
-              className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl hover:bg-slate-50 transition-colors"
+      {/* MOBILE DRAWER OVERLAY BACKGROUND BARRIER */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 md:hidden animate-in fade-in duration-200"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* RIGHT AREA: Sidebar Channel Member Roster (Responsive Panel) */}
+      <div
+        className={`
+        fixed inset-y-0 right-0 w-64 bg-slate-950 p-6 space-y-4 z-50 transform transition-transform duration-300 ease-in-out border-l border-white/6
+        md:static md:translate-x-0 md:flex md:h-full md:flex-col shrink-0
+        ${isSidebarOpen ? "translate-x-0" : "translate-x-full"}
+      `}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+            Members
+          </h3>
+          <div className="flex items-center gap-2">
+            <span className="rounded-md bg-white/4 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 ring-1 ring-white/6">
+              {memberCount}
+            </span>
+            <button
+              onClick={() => setIsSidebarOpen(false)}
+              className="text-slate-400 hover:text-white font-medium text-sm md:hidden p-1"
             >
-              <div className="relative">
-                <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center text-sm font-semibold text-slate-700 uppercase border border-slate-200">
-                  {name.charAt(0)}
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <div className="grow overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+          {memberList.map((name) => {
+            const isMe = name === username;
+            return (
+              <div
+                key={name}
+                className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-white/2 transition-colors duration-150 group"
+              >
+                <div className="relative">
+                  <div className="h-7 w-7 rounded-xl bg-linear-to-b from-slate-800 to-slate-900 border border-white/8 flex items-center justify-center text-[11px] font-bold text-slate-200 uppercase tracking-wider group-hover:border-white/20 transition-colors">
+                    {name.charAt(0)}
+                  </div>
+                  <div className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-slate-950" />
                 </div>
-                <div className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-white" />
+                <span className="text-xs font-medium text-slate-300 truncate max-w-35">
+                  {name}
+                  {isMe && (
+                    <span className="ml-1 text-[10px] text-slate-500 font-normal">
+                      (you)
+                    </span>
+                  )}
+                </span>
               </div>
-              <span className="text-sm font-medium text-slate-700 truncate max-w-35">
-                {name}{" "}
-                {name === username && (
-                  <span className="text-xs text-slate-400 font-normal">
-                    (you)
-                  </span>
-                )}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
